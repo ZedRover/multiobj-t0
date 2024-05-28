@@ -1,7 +1,7 @@
 import copy
 import sutils
 import common as cm
-from models.mlp_cat_v2 import CatNet
+from models.mlp_cat_v2 import *
 import numpy as np
 import pandas as pd
 import SharedArray as sa
@@ -37,6 +37,9 @@ args.add_argument("--split", "-sp", type=int, default=0)
 args.add_argument("--cur", type=int, default=0)
 args.add_argument("--fut", type=int, default=60)
 args.add_argument("--desc", "-d", type=str, default=None)
+args.add_argument(
+    "--labels", type=int, nargs="+", required=True, help="A list of integers"
+)
 args = args.parse_args()
 
 
@@ -107,6 +110,7 @@ class CustomValidationCallback(pl.Callback):
                 "test/bIC": result.bIC.mean(),
                 "test/q01": result.q01.mean(),
                 "test/q99": result.q99.mean(),
+                "test/qret": (result.q99.mean() - result.q01.mean()) / 2,
             },
             step=self.global_step,
         )
@@ -135,18 +139,19 @@ if __name__ == "__main__":
         "lr": 1e-4,
         "loss_fn": "mse",
         "weight_decay": 1e-3,
-        "loss_weights": [0.6, 0.2, 0.2],
-        "l2": 1e-3,
+        "loss_weights": [0.6, 0.4, 0.1],
+        "l2": 0,
     }
 
     model = CatNet(**model_param)
     print(model)
     ## Logger details
 
-    labels_str = "".join(
+    labels_str = "+".join(
         [["ret", "mean", "var", "rv", "min", "max", "gap"][i] for i in labels]
     )
-    experiment_name = f"f{args.fold}_n{len(stk_list)}_b{args.batch_size}_{args.cur}-{args.fut}_{labels_str}"
+
+    experiment_name = f"f{args.fold}-{args.cur}-{args.fut}_{len(labels)}"
 
     datamodule = sutils.MTDataModule(
         codes=stk_list,
@@ -158,7 +163,7 @@ if __name__ == "__main__":
         fut=args.fut,
     )
     logger = wandb_logger.WandbLogger(
-        project="Cat" if args.num_stocks == 100 else "Cat-s",
+        project="MTL-100" if args.num_stocks == 100 else "Cat-s",
         name=experiment_name,
     )
     logger.experiment.config.update(
@@ -166,9 +171,8 @@ if __name__ == "__main__":
             "num_stocks": len(stk_list),
             "tmstamp": timestamp,
             "fold": args.fold,
-            "release": False,
             "batch_size": args.batch_size,
-            "lables": labels,
+            "labels": labels_str,
             "Notes": args.desc,
         }
     )
@@ -199,11 +203,13 @@ if __name__ == "__main__":
             test_callback,
         ],
         logger=logger,
-        max_epochs=80,
+        max_epochs=200,
         precision="16-mixed",
         # detect_anomaly=True,
         # fast_dev_run=True,
     )
-
+    calculate_prior_losses(
+        model, datamodule.train_dataloader(), loss=model_param["loss_fn"]
+    )
     trainer.fit(model, datamodule)
     trainer.test(model, datamodule, ckpt_path="best")
