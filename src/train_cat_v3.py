@@ -1,7 +1,7 @@
 import copy
 import sutils
 import common as cm
-from models.mlp_cat_v2 import *
+from models.mlp_cat_v3 import *
 import numpy as np
 import pandas as pd
 import SharedArray as sa
@@ -136,10 +136,14 @@ if __name__ == "__main__":
         "final_size": 1,
         "act": "leakyrelu",
         "dropout": 0.4,
-        "lr": 1e-4,
+        "lr": 1e-5,
         "loss_fn": "mse",
         "weight_decay": 1e-3,
-        "loss_weights": [0.6, 0.4, 0.1] + [0.4] * (len(labels) - 3),
+        "loss_weights": (
+            [0.6, 0.4, 0.1] + [0.4] * (len(labels) - 3)
+            if len(labels) > 3
+            else [0.6, 0.4, 0.1]
+        ),
         "l2": 0,
     }
 
@@ -147,9 +151,7 @@ if __name__ == "__main__":
     print(model)
     ## Logger details
 
-    labels_str = "+".join(
-        [["ret", "mean", "var", "rv", "min", "max", "gap"][i] for i in labels]
-    )
+    labels_str = "+".join([sutils.label_names[i] for i in labels])
 
     experiment_name = f"f{args.fold}-{args.cur}-{args.fut}_{len(labels)}"
 
@@ -163,7 +165,7 @@ if __name__ == "__main__":
         fut=args.fut,
     )
     logger = wandb_logger.WandbLogger(
-        project="MTL-100-May31" if args.num_stocks == 100 else "Cat-s",
+        project="MTL-CAT-V3" if args.num_stocks == 100 else "Cat-s",
         name=experiment_name,
     )
     logger.experiment.config.update(

@@ -195,27 +195,26 @@ class DataLoaderZ:
 
 
 # {'var_1-60', 'vol_120-180', 'vol_1-60', 'mean_1-60', 'var_60-120', 'mean_60-120', 'mid_price', 'vol_60-120', 'var_120-180', 'mean_120-180'}
-def get_label(code, cur=0, fut=60):
+label_names = ["ret", "mean", "var", "vol", "min", "max", "gap", "nret"]
+
+
+def get_label(code, cur=0, fut=60, label_idx=[]):
     tag = f"{cur}-{fut}"
+    raw_ret = sa.attach(f"label_{code}")
+    n = len(raw_ret)
+
     path = f"/mnt/disk1/multiobj_dataset/{code}"
-    mean, var, vol = (
-        np.load(f"{path}/mean_{tag}.npy"),
-        np.load(f"{path}/var_{tag}.npy"),
-        np.load(f"{path}/vol_{tag}.npy"),
-    )
-    min, max, gap = (
-        np.load(f"{path}/min_{tag}.npy"),
-        np.load(f"{path}/max_{tag}.npy"),
-        np.load(f"{path}/gap_{tag}.npy"),
-    )
-    return (
-        mean.astype(np.float32),
-        var.astype(np.float32),
-        vol.astype(np.float32),
-        min.astype(np.float32),
-        max.astype(np.float32),
-        gap.astype(np.float32),
-    )
+    selected_labels = [label_names[i] for i in label_idx]
+    labels = []
+    for label in selected_labels:
+        if "ret" not in label:
+            name = f"{label}_{tag}.npy"
+            labels.append(np.load(f"{path}/{name}").astype(np.float32)[:n])
+        elif "nret" in label:
+            name = f"ret_{fut}.npy"
+            labels.append(np.load(f"{path}/{name}").astype(np.float32)[:n])
+    res = np.concatenate([raw_ret] + labels, axis=1)
+    return res
 
 
 class MTDataModule(pl.LightningDataModule):
@@ -257,13 +256,7 @@ class MTDataModule(pl.LightningDataModule):
 
         for code in tqdm(codes):
             df, y, ts = get_data(code)
-            new_labels = get_label(code, cur, fut)
-            n = len(y)
-            all_labels = [y] + [i[:n] for i in new_labels]
-            label = np.concatenate(
-                [all_labels[i] for i in labels_idx],
-                axis=1,
-            )
+            label = get_label(code, cur, fut, labels_idx)
 
             train_idx = (ts < train_end) & (ts >= train_end - 10000)
             test_idx = (ts < test_end) & (ts >= train_end)

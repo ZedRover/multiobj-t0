@@ -1,7 +1,8 @@
 import copy
 import sutils
+from sutils import *
 import common as cm
-from models.mlp_cat_v2 import *
+from models.mlp_cat_v3 import *
 import numpy as np
 import pandas as pd
 import SharedArray as sa
@@ -41,6 +42,147 @@ args.add_argument(
     "--labels", type=int, nargs="+", default=[0, 1, 3], help="A list of integers"
 )
 args = args.parse_args()
+cur, fut = args.cur, args.fut
+other_labels = ["mean", "var", "vol", "min", "max", "gap"]
+other_labels = [f"{other_labels[i]}_{cur}-{fut}" for i in args.labels]
+label_names = [
+    "ret_60",
+    "ret_120",
+    "ret_180",
+    # "ret_300",
+    # "ret_600",
+    "ret_6000",
+] + other_labels
+
+
+def get_label(code, cur=0, fut=60, label_idx=[]):
+    raw_ret = sa.attach(f"label_{code}")
+    n = len(raw_ret)
+
+    path = f"/mnt/disk1/multiobj_dataset/{code}"
+    labels = []
+    for label in label_names:
+        labels.append(np.load(f"{path}/{label}.npy").astype(np.float32)[:n])
+    res = np.concatenate([raw_ret] + labels, axis=1)
+    return res
+
+
+class MTDataModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        codes: List[str],
+        labels_idx: List[int],
+        fold: int,
+        split: int,
+        batch_size: int = 40000,
+        cur: int = 60,
+        fut: int = 120,
+        collate_fn: Callable = None,
+        collate_type: str = "pool",
+        *args,
+        **kwargs,
+    ):
+        super().__init__()
+        self.codes = codes
+        self.batch_size = batch_size
+
+        dates = cm.dates
+        train_end = dates[fold]
+        test_end = dates[fold + 1]
+        x_trains, x_valids, x_tests, y_trains, y_valids, y_tests = (
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
+        test_x_dict = {}
+        test_y_dict = {}
+        test_ts_dict = {}
+        dates = cm.dates
+        train_end = dates[fold]
+        test_end = dates[fold + 1]
+
+        for code in tqdm(codes):
+            df, y, ts = sutils.get_data(code)
+            label = get_label(code, cur, fut, labels_idx)
+
+            train_idx = (ts < train_end) & (ts >= train_end - 10000)
+            test_idx = (ts < test_end) & (ts >= train_end)
+            x_train, x_test = df[train_idx, :], df[test_idx, :]
+            y_train, y_test = label[train_idx, :], label[test_idx, :]
+
+            x_train, x_test, y_train, y_test = map(
+                th.from_numpy, (x_train, x_test, y_train, y_test)
+            )
+
+            idx = list(range(len(y_train)))
+
+            if split == 0:
+                train_idx, valid_idx = train_test_split(
+                    idx,
+                    test_size=0.3,
+                    shuffle=True,
+                )
+
+            elif split == 1:
+                split = int(len(idx) * 0.7)
+                train_idx, valid_idx = idx[:split], idx[split:]
+
+            else:
+                split = int(len(idx) * 0.7)
+                gap = int(len(idx) * 0.01)
+                train_idx, valid_idx = idx[:split], idx[split + gap :]
+
+            x_train, x_valid, y_train, y_valid = (
+                x_train[train_idx],
+                x_train[valid_idx],
+                y_train[train_idx],
+                y_train[valid_idx],
+            )
+
+            # quantile = 0.03
+            # lb, ub = th.quantile(y_train, quantile, dim=0), th.quantile(
+            #     y_train, 1 - quantile, dim=0
+            # )
+            # y_train = th.clamp(y_train, lb, ub)
+
+            x_trains.append(x_train)
+            x_valids.append(x_valid)
+            x_tests.append(x_test)
+            y_trains.append(y_train)
+            y_valids.append(y_valid)
+            y_tests.append(y_test)
+            test_x_dict[code] = x_test
+            test_y_dict[code] = y_test
+            ts_test = ts[test_idx]
+            test_ts_dict[code] = ts_test
+        x_train, x_valid, x_test, y_train, y_valid, y_test = map(
+            th.vstack, (x_trains, x_valids, x_tests, y_trains, y_valids, y_tests)
+        )
+        self.train_dataset = (x_train, y_train)
+        self.valid_dataset = (x_valid, y_valid)
+        self.test_dataset = (x_test, y_test)
+        self.test_x_dict = test_x_dict
+        self.test_y_dict = test_y_dict
+        self.test_ts_dict = test_ts_dict
+
+    def setup(self, stage: str):
+        pass
+
+    def train_dataloader(self):
+        return DataLoaderY(
+            *self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+        )
+
+    def val_dataloader(self):
+        return DataLoaderY(*self.valid_dataset, batch_size=self.batch_size)
+
+    def test_dataloader(self):
+        return DataLoaderY(*self.test_dataset, batch_size=self.batch_size)
 
 
 def backtest_stocks(
@@ -127,7 +269,7 @@ if __name__ == "__main__":
     print(f"selected stk_list:\n{stk_list}")
 
     ## Model
-    labels = args.labels
+    labels = label_names
 
     model_param = {
         "input_size": 101,
@@ -139,7 +281,11 @@ if __name__ == "__main__":
         "lr": 1e-4,
         "loss_fn": "mse",
         "weight_decay": 1e-3,
-        "loss_weights": [0.6, 0.4, 0.1] + [0.4] * (len(labels) - 3),
+        "loss_weights": (
+            [0.6, 0.4, 0.1] + [0.4] * (len(labels) - 3)
+            if len(labels) > 3
+            else [0.6, 0.4, 0.1]
+        ),
         "l2": 0,
     }
 
@@ -147,13 +293,11 @@ if __name__ == "__main__":
     print(model)
     ## Logger details
 
-    labels_str = "+".join(
-        [["ret", "mean", "var", "rv", "min", "max", "gap"][i] for i in labels]
-    )
+    labels_str = "+".join(label_names)
 
     experiment_name = f"f{args.fold}-{args.cur}-{args.fut}_{len(labels)}"
 
-    datamodule = sutils.MTDataModule(
+    datamodule = MTDataModule(
         codes=stk_list,
         labels_idx=labels,
         fold=args.fold,
@@ -163,7 +307,7 @@ if __name__ == "__main__":
         fut=args.fut,
     )
     logger = wandb_logger.WandbLogger(
-        project="MTL-100-May31" if args.num_stocks == 100 else "Cat-s",
+        project="MTL-CAT-V4" if args.num_stocks == 100 else "Cat-s",
         name=experiment_name,
     )
     logger.experiment.config.update(

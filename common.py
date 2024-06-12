@@ -596,9 +596,12 @@ def calc_ic(x, y):
 
 
 def daily_ic(df):
-    ic_values = df.groupby("date").apply(
-        lambda x: corr(x["yhat"].values, x["y"].values)
-    )
+    try:
+        ic_values = df.groupby("date").apply(
+            lambda x: corr(x["yhat"].values, x["y"].values)
+        )
+    except:
+        return 0
     return np.mean(ic_values)
 
 

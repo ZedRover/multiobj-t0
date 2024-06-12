@@ -39,13 +39,14 @@ class CatMLPModel(nn.Module):
                 nn.Linear(feature_size, 1),
             ]
             self.feature_extractors.append(nn.Sequential(*layers))
-        self.final_layer = nn.Linear(len(feature_sizes), final_size)
+        self.final_layer = nn.Linear(len(feature_sizes) + input_size, final_size)
 
     def forward(self, x):
         mid_output = self.dnn_layers(x)
         features = [extractor(mid_output) for extractor in self.feature_extractors]
         combined_features = th.cat(features, dim=1)
-        final_output = self.final_layer(combined_features)
+        combined_signals = th.cat([combined_features, x], dim=1)
+        final_output = self.final_layer(combined_signals)
         return combined_features, final_output
 
 
