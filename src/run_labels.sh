@@ -8,7 +8,7 @@ labels=("0 1" "0 1 3")
 # "0 1 3" "0 1 3 4" "0 1 3 4 5"  "0 1 3 4 5 6"
 # labels=("0 1 3")
 repeat=1  # 每个任务的重复运行次数
-max_parallel_tasks=2  # 每个 GPU 上并行的最大任务数量
+max_parallel_tasks=3  # 每个 GPU 上并行的最大任务数量
 
 # 函数来生成任务命令
 generate_commands() {

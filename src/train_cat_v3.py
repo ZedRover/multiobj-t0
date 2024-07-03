@@ -21,7 +21,6 @@ import os
 from argparse import ArgumentParser
 import wandb
 from datetime import datetime
-from mlutils.data import DataLoaderY
 
 th.set_float32_matmul_precision("medium")
 
@@ -59,7 +58,7 @@ def backtest_stocks(
         test_x_dict = test_data.test_x_dict
         test_y_dict = test_data.test_y_dict
         test_ts_dict = test_data.test_ts_dict
-    result = []
+    result = [] 
 
     with th.no_grad():
         for code in stk_list:

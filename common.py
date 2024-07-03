@@ -13,12 +13,14 @@ import torch as th
 from sklearn.model_selection import train_test_split
 
 PATH_SNAPSHOTS = r"/mnt/nas/data/data_universe/data_hub"
-PATH_FACTORS = r"\\192.168.88.80\lc\股票t0研究\数据\股票数据hdf5"
-PATH_WY = r"\\192.168.88.80\lc\股票t0研究\wy"
-PATH_FACTORS = r"H:\data\factors"
+PATH_FACTORS = r"/mnt/nas/data/股票数据hdf5"
 
-files = glob(os.path.join(PATH_FACTORS, "*.parquet"))
-STK_CODES = [os.path.basename(file).split("_")[1].split(".")[0] for file in files]
+
+files = glob(os.path.join(PATH_FACTORS, "*.h5"))
+STK_CODES = sorted(
+    [os.path.basename(file).split("_")[1].split(".")[0] for file in files]
+)
+
 dates = [
     20210401,
     20210701,
